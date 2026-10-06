@@ -1,96 +1,330 @@
-"""GDPruner's paper workflow, without concrete experimental settings.
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-Model operations are supplied by a backend; search settings are symbolic inputs.
-This module illustrates the algorithm rather than an experiment entry point.
-"""
+import argparse
+import json
+import os
+import random
+from typing import Dict, List, Any
 
-from statistics import mean
+import torch
+import torch.nn.functional as F
+from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from utils import AdaptiveSearchPolicy, Probe, dense_to_pruned_kl
+from utils import (
+    get_prunable_blocks,
+    temporarily_disable_block,
+    get_model_input_device,
+)
 
 
-def construct_synthetic_probes(dense_model, seed_prompts, backend):
-    """Stage 1: generate dense trajectories and cache their tail distributions."""
-    probes = []
-    for prompt in seed_prompts:
-        trajectory = backend.generate(dense_model, prompt)
-        positions = backend.tail_positions(trajectory)
-        dense_tail = tuple(
-            (
-                position,
-                backend.next_token_distribution(
-                    dense_model, prompt, trajectory, position
-                ),
-            )
-            for position in positions
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def get_torch_dtype(dtype_name: str):
+    if dtype_name == "auto":
+        return "auto"
+    if dtype_name == "float16":
+        return torch.float16
+    if dtype_name == "bfloat16":
+        return torch.bfloat16
+    if dtype_name == "float32":
+        return torch.float32
+    raise ValueError(f"Unsupported dtype: {dtype_name}")
+
+
+def load_model_and_tokenizer(args: argparse.Namespace):
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_name_or_path,
+        trust_remote_code=True,
+    )
+
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    torch_dtype = get_torch_dtype(args.dtype)
+
+    model_kwargs = {
+        "torch_dtype": torch_dtype,
+        "trust_remote_code": True,
+    }
+
+    if args.device_map.lower() != "none":
+        model_kwargs["device_map"] = args.device_map
+
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path,
+        **model_kwargs,
+    )
+
+    if args.device_map.lower() == "none":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model.to(device)
+
+    model.eval()
+    return model, tokenizer
+
+
+@torch.no_grad()
+def generate_probe_trajectory(
+    model,
+    tokenizer,
+    prompt: str,
+    gen_len: int,
+    do_sample: bool,
+    temperature: float,
+    top_p: float,
+) -> Dict[str, Any]:
+    device = get_model_input_device(model)
+
+    encoded = tokenizer(
+        prompt,
+        return_tensors="pt",
+        add_special_tokens=True,
+    )
+    input_ids = encoded["input_ids"].to(device)
+
+    prompt_len = input_ids.shape[1]
+
+    generation_kwargs = {
+        "input_ids": input_ids,
+        "max_new_tokens": gen_len,
+        "pad_token_id": tokenizer.eos_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+        "use_cache": True,
+    }
+
+    if do_sample:
+        generation_kwargs.update(
+            {
+                "do_sample": True,
+                "temperature": temperature,
+                "top_p": top_p,
+            }
         )
-        if not dense_tail:
-            raise ValueError("Each probe must contain evaluated tail positions.")
-        probes.append(Probe(prompt, trajectory, dense_tail))
-    if not probes:
-        raise ValueError("The synthetic probe set must be nonempty.")
+    else:
+        generation_kwargs.update({"do_sample": False})
+
+    output_ids = model.generate(**generation_kwargs)
+    full_ids = output_ids[0].detach().cpu()
+
+    continuation_len = full_ids.shape[0] - prompt_len
+    if continuation_len <= 0:
+        raise RuntimeError("Model did not generate continuation tokens.")
+
+    return {
+        "prompt": prompt,
+        "prompt_len": int(prompt_len),
+        "continuation_len": int(continuation_len),
+        "input_ids": full_ids,
+    }
+
+
+@torch.no_grad()
+def build_dense_probe_cache(
+    model,
+    tokenizer,
+    prompts: List[str],
+    gen_len: int,
+    tail_len: int,
+    top_k: int,
+    do_sample: bool,
+    temperature: float,
+    top_p: float,
+) -> List[Dict[str, Any]]:
+    device = get_model_input_device(model)
+    probes = []
+
+    for prompt in tqdm(prompts, desc="Building dense self-generated probes"):
+        probe = generate_probe_trajectory(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=prompt,
+            gen_len=gen_len,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+        )
+
+        input_ids_cpu = probe["input_ids"]
+        input_ids = input_ids_cpu.unsqueeze(0).to(device)
+        total_len = input_ids.shape[1]
+        continuation_len = probe["continuation_len"]
+        effective_tail_len = min(tail_len, continuation_len)
+
+        # Last effective_tail_len generated tokens are predicted by the previous positions.
+        start_logit_pos = total_len - effective_tail_len - 1
+        end_logit_pos = total_len - 1
+
+        if start_logit_pos < 0:
+            raise RuntimeError("Invalid tail positions. Try increasing prompt or generation length.")
+
+        tail_positions = torch.arange(
+            start_logit_pos,
+            end_logit_pos,
+            device=device,
+            dtype=torch.long,
+        )
+
+        outputs = model(
+            input_ids=input_ids,
+            use_cache=False,
+        )
+        tail_logits = outputs.logits[:, tail_positions, :]
+        log_probs = F.log_softmax(tail_logits.float(), dim=-1)
+
+        k = min(top_k, log_probs.shape[-1])
+        topk_log_probs, topk_indices = torch.topk(log_probs, k=k, dim=-1)
+
+        probe.update(
+            {
+                "tail_positions": tail_positions.detach().cpu(),
+                "dense_topk_log_probs": topk_log_probs.detach().cpu(),
+                "dense_topk_indices": topk_indices.detach().cpu(),
+            }
+        )
+        probes.append(probe)
+
+        del outputs, tail_logits, log_probs, topk_log_probs, topk_indices
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     return probes
 
 
-def score_pruning_subset(dense_model, subset, probes, backend):
-    """Stage 2: forward KL on shared prefixes, averaged per probe and across probes.
+@torch.no_grad()
+def compute_block_tail_kl(
+    model,
+    probes: List[Dict[str, Any]],
+) -> float:
+    device = get_model_input_device(model)
 
-    The backend temporarily disables every block in the candidate subset and
-    restores all of them on exit. Both models use the cached dense trajectory.
-    """
-    probe_scores = []
-    with backend.disabled_blocks(dense_model, subset):
-        for probe in probes:
-            tail_scores = []
-            for position, dense_distribution in probe.dense_tail:
-                pruned_distribution = backend.next_token_distribution(
-                    dense_model, probe.prompt, probe.trajectory, position
-                )
-                tail_scores.append(
-                    dense_to_pruned_kl(dense_distribution, pruned_distribution)
-                )
-            probe_scores.append(mean(tail_scores))
-    return mean(probe_scores)
+    total_kl = 0.0
+    total_positions = 0
 
+    for probe in probes:
+        input_ids = probe["input_ids"].unsqueeze(0).to(device)
+        tail_positions = probe["tail_positions"].to(device)
+        dense_topk_log_probs = probe["dense_topk_log_probs"].to(device)
+        dense_topk_indices = probe["dense_topk_indices"].to(device)
 
-def adaptive_block_search(dense_model, blocks, probes, backend, policy):
-    """Stage 3: expand and rescore block subsets under the symbolic budget K."""
-    if not 0 <= policy.budget <= len(blocks):
-        raise ValueError("The pruning budget must fit the candidate block set.")
+        outputs = model(
+            input_ids=input_ids,
+            use_cache=False,
+        )
+        pruned_tail_logits = outputs.logits[:, tail_positions, :]
+        pruned_log_probs = F.log_softmax(pruned_tail_logits.float(), dim=-1)
 
-    empty_subset = frozenset()
-    score_cache = {empty_subset: 0.0}
-    beam = [(empty_subset, score_cache[empty_subset])]
-    beam_width = policy.beam_small
-    previous_best = score_cache[empty_subset]
-    recent_marginals = []
+        pruned_topk_log_probs = torch.gather(
+            pruned_log_probs,
+            dim=-1,
+            index=dense_topk_indices,
+        )
 
-    for _ in range(policy.budget):
-        candidates = {}
-        for subset, _ in beam:
-            for block in blocks:
-                if block in subset:
-                    continue
-                expanded_subset = subset | {block}
-                if expanded_subset not in score_cache:
-                    score_cache[expanded_subset] = score_pruning_subset(
-                        dense_model, expanded_subset, probes, backend
-                    )
-                candidates[expanded_subset] = score_cache[expanded_subset]
+        dense_topk_probs = dense_topk_log_probs.exp()
+        kl_per_pos = (
+            dense_topk_probs * (dense_topk_log_probs - pruned_topk_log_probs)
+        ).sum(dim=-1)
 
-        beam = sorted(candidates.items(), key=lambda item: item[1])[:beam_width]
-        best_score = beam[0][1]
-        marginal = best_score - previous_best
-        beam_width = policy.next_beam_width(marginal, recent_marginals)
-        recent_marginals.append(marginal)
-        recent_marginals = recent_marginals[-policy.window_size:]
-        previous_best = best_score
+        total_kl += float(kl_per_pos.sum().detach().cpu())
+        total_positions += int(kl_per_pos.numel())
 
-    return beam[0][0]
+        del outputs, pruned_tail_logits, pruned_log_probs, pruned_topk_log_probs
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    return total_kl / max(total_positions, 1)
 
 
-def gdpruner(dense_model, seed_prompts, backend, policy: AdaptiveSearchPolicy):
-    """Run the paper's three stages and return the selected pruning subset."""
-    probes = construct_synthetic_probes(dense_model, seed_prompts, backend)
-    blocks = tuple(backend.prunable_blocks(dense_model))
-    return adaptive_block_search(dense_model, blocks, probes, backend, policy)
+def save_json(path: str, data: Any) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def main(args: argparse.Namespace, prompts: List[str]) -> None:
+    """Run the original scoring pipeline with caller-supplied settings and prompts."""
+    set_seed(args.seed)
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    model, tokenizer = load_model_and_tokenizer(args)
+
+    if not prompts:
+        raise ValueError("Provide a nonempty collection of generic prompts.")
+
+    probes = build_dense_probe_cache(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=prompts,
+        gen_len=args.gen_len,
+        tail_len=args.tail_len,
+        top_k=args.top_k,
+        do_sample=args.do_sample,
+        temperature=args.temperature,
+        top_p=args.top_p,
+    )
+
+    blocks = get_prunable_blocks(model)
+    if args.max_blocks > 0:
+        blocks = blocks[: args.max_blocks]
+
+    if len(blocks) == 0:
+        raise RuntimeError("No prunable MHA/MLP blocks were found for this model.")
+
+    print(f"\nFound {len(blocks)} candidate blocks to score.")
+
+    scores = []
+    for block in tqdm(blocks, desc="Scoring candidate blocks"):
+        with temporarily_disable_block(block):
+            score = compute_block_tail_kl(model, probes)
+
+        scores.append(
+            {
+                "name": block.name,
+                "layer_idx": block.layer_idx,
+                "block_type": block.block_type,
+                "tail_kl": score,
+            }
+        )
+
+    scores_sorted = sorted(scores, key=lambda x: x["tail_kl"])
+    prune_order = [item["name"] for item in scores_sorted]
+
+    save_json(os.path.join(args.output_dir, "block_scores.json"), scores_sorted)
+    save_json(os.path.join(args.output_dir, "prune_order.json"), prune_order)
+
+    summary_path = os.path.join(args.output_dir, "summary.txt")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write("GDPruner lightweight demo summary\n")
+        f.write("=" * 40 + "\n")
+        f.write(f"Model: {args.model_name_or_path}\n")
+        f.write(f"Number of prompts: {len(prompts)}\n")
+        f.write(f"Generation length: {args.gen_len}\n")
+        f.write(f"Tail length: {args.tail_len}\n")
+        f.write(f"Top-k: {args.top_k}\n")
+        f.write(f"Scored blocks: {len(blocks)}\n\n")
+        f.write("Lowest-drift candidate blocks:\n")
+        for item in scores_sorted[:10]:
+            f.write(
+                f"{item['name']:40s} "
+                f"type={item['block_type']:4s} "
+                f"layer={item['layer_idx']:03d} "
+                f"tail_kl={item['tail_kl']:.6f}\n"
+            )
+
+    print("\nDone.")
+    print(f"Saved block scores to: {os.path.join(args.output_dir, 'block_scores.json')}")
+    print(f"Saved pruning order to: {os.path.join(args.output_dir, 'prune_order.json')}")
+    print(f"Saved summary to: {summary_path}")
+
+    print("\nTop-10 lowest-drift blocks:")
+    for item in scores_sorted[:10]:
+        print(
+            f"{item['name']:40s} "
+            f"type={item['block_type']:4s} "
+            f"layer={item['layer_idx']:03d} "
+            f"tail_kl={item['tail_kl']:.6f}"
+        )
