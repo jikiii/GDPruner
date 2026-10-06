@@ -17,10 +17,10 @@
 </div>
 
 <p align="center">
-  <img src="assets/overview.svg" width="100%" alt="GDPruner scoring pipeline: generate probes, cache dense tail distributions, score individually disabled blocks, and rank candidates by generation drift.">
+  <img src="assets/overview.svg" width="100%" alt="GDPruner framework: synthetic probe construction, tail-divergence scoring, and adaptive block search.">
 </p>
 
-<p align="center"><em>Core scoring pipeline. Lower generation drift places a block earlier in the candidate pruning order.</em></p>
+<p align="center"><em>Overview of the GDPruner framework: synthetic probe construction, tail-divergence scoring, and adaptive block search.</em></p>
 
 ## Overview
 
@@ -124,7 +124,7 @@ outputs/
 ```text
 GDPruner/
 ├── assets/
-│   └── overview.svg    # Scoring pipeline diagram
+│   └── overview.svg    # GDPruner framework diagram
 ├── gdpruner.py         # Probe generation, dense caching, scoring, and ranking
 ├── utils.py            # Block discovery and temporary block disabling
 └── README.md
