@@ -12,7 +12,7 @@
   <a href="https://huggingface.co/docs/transformers"><img src="https://img.shields.io/badge/Hugging%20Face-Transformers-FFD21E?style=flat-square" alt="Hugging Face Transformers"></a>
 </p>
 
-[Overview](#overview) &nbsp; | &nbsp; [Quick start](#quick-start) &nbsp; | &nbsp; [Configuration](#configuration) &nbsp; | &nbsp; [Outputs](#outputs)
+[Overview](#overview)
 
 </div>
 
