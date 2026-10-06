@@ -147,7 +147,6 @@ def temporarily_disable_block(block: BlockInfo):
 
 @contextmanager
 def temporarily_disable_blocks(blocks: Iterable[BlockInfo]):
-    """Mask a whole candidate subset; restore all modules, also after exceptions."""
     seen = set()
     with ExitStack() as stack:
         for block in blocks:
