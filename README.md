@@ -14,9 +14,3 @@ The framework follows three stages. First, the dense model generates lightweight
 
 <p align="center"><em>Overview of GDPruner: synthetic probe construction, tail-divergence scoring, and adaptive block search.</em></p>
 
-GDPruner offers four key advantages:
-
-- **Calibration-free probing.** Self-generated trajectories remove the need for external calibration data and keep pruning probes aligned with the dense model's generation behavior.
-- **Generation-aligned scoring.** Tail-position drift evaluates changes to next-token distributions, helping identify blocks that are less critical to stable autoregressive generation.
-- **Interaction-aware pruning.** Candidate subsets are scored jointly during search, capturing coupled block effects that independent ranking can miss.
-- **A strong efficiency–performance balance.** Adaptive search concentrates exploration on sensitive pruning steps, while the paper's experiments demonstrate competitive inference acceleration and strong preservation of overall accuracy and complex generative reasoning.
