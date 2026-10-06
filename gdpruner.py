@@ -20,16 +20,7 @@ from utils import (
 
 
 DEFAULT_PROMPTS = [
-    "Explain why public transportation can change daily life in a city.",
-    "A rectangle has length 12 and width 7. If both dimensions increase by 2, how much does the area increase?",
-    "Write a short paragraph about becoming a better listener.",
-    "Discuss whether economic growth always improves quality of life.",
-    "Describe a future classroom where humans and AI collaborate naturally.",
-    "Solve the problem step by step: If a product costs 80 dollars and is marked up by 25%, then discounted by 10%, what is the final price?",
-    "Write a Python function that removes duplicates from a list while preserving order.",
-    "Explain why pruning a language model may affect long-form generation.",
-    "What are hidden challenges of working from home?",
-    "Describe a city where most private cars have been replaced by public transportation.",
+    "Explain why public transportation can change daily life in a city."
 ]
 
 
@@ -63,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tail_len",
         type=int,
-        default=16,
+        default=64,
         help="Number of tail positions used for KL scoring.",
     )
     parser.add_argument(
