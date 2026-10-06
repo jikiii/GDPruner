@@ -8,8 +8,7 @@
 
 <p>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python"></a>
-  <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-EE4C2C?style=flat-square&amp;logo=pytorch&amp;logoColor=white" alt="PyTorch"></a>
-  <a href="https://huggingface.co/docs/transformers"><img src="https://img.shields.io/badge/Hugging%20Face-Transformers-FFD21E?style=flat-square" alt="Hugging Face Transformers"></a>
+  <img src="https://img.shields.io/badge/Algorithm-Workflow_Reference-2E7D32?style=flat-square" alt="Algorithm workflow reference">
 </p>
 
 [Overview](#overview)
@@ -24,13 +23,14 @@
 
 ## Overview
 
-GDPruner uses generation drift to estimate the importance of individual multi-head attention (MHA) and multi-layer perceptron (MLP) blocks. The dense model generates its own probe trajectories; candidate blocks are then scored against the dense model's output distributions at the tail of those trajectories.
+GDPruner identifies redundant multi-head attention (MHA) and multi-layer perceptron (MLP) blocks by measuring their impact on generation. The dense model generates synthetic probe trajectories. Candidate pruning subsets are evaluated on the tails of these shared trajectories, and adaptive search retains low-drift subsets under a symbolic pruning budget.
 
-This repository provides a **minimal demonstration of the core scoring pipeline**. It produces block scores and a candidate pruning order for use in a pruning workflow. Each block is temporarily disabled on its own and restored after scoring; this demo does not export a structurally pruned model or run the full adaptive search and benchmark evaluation.
+This repository provides a **workflow reference for the paper's method**. It shows synthetic probe construction, tail-divergence scoring, and adaptive block search. Model operations and all experimental settings are supplied externally: the reference contains no fixed model, prompt examples, concrete hyperparameter values, or default experiment configuration. It returns a selected block subset; model export and benchmark evaluation belong to a separate integration.
 
-| Step | What the demo does |
+| Stage | Paper workflow |
 | --- | --- |
-| **1. Generate probes** | Create short continuations from built-in generic prompts using the dense model. |
-| **2. Cache dense outputs** | Store the dense model's top-k token distributions at tail positions. |
-| **3. Score candidates** | Disable one MHA or MLP block, replay the cached trajectory, and compute a top-k approximation to dense-to-disabled tail KL divergence. |
-| **4. Rank blocks** | Sort candidates by their mean tail score, from lower to higher generation drift. |
+| **Synthetic probe construction** | Generate trajectories from externally supplied generic prompts and cache dense next-token distributions at tail positions. |
+| **Tail-divergence scoring** | Temporarily disable a candidate block subset, evaluate the same dense-generated prefixes, and average dense-to-pruned KL first within each probe and then across probes. |
+| **Adaptive block search** | Expand retained subsets, score block interactions jointly, and adjust beam width using recent marginal drift changes and median/MAD statistics. |
+
+`gdpruner.py` contains the three-stage flow. `utils.py` defines the backend contract, the KL objective, and a search policy whose settings have no assigned defaults. The supplied framework figure illustrates the method.
