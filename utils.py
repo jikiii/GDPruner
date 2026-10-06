@@ -1,8 +1,3 @@
-"""Symbolic interfaces and mathematical helpers for the paper workflow.
-
-No model, prompt text, decoding configuration, or hyperparameter value is fixed.
-"""
-
 from dataclasses import dataclass
 from math import fsum, inf, log
 from statistics import median
