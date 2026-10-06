@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="350" viewBox="0 0 1080 350" role="img" aria-labelledby="title description">
+  <title id="title">GDPruner core scoring pipeline</title>
+  <desc id="description">The dense model generates probe trajectories and caches tail-position top-k distributions. Each candidate MHA or MLP block is disabled temporarily while cached trajectories are replayed. Candidates are ranked by their approximate mean tail KL score.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker>
+  </defs>
+  <rect x="1" y="1" width="1078" height="348" rx="20" fill="#ffffff" stroke="#e2e8f0"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="540" y="40" text-anchor="middle" font-size="23" font-weight="700" fill="#0f172a">Generation drift as a block-importance signal</text>
+    <text x="540" y="64" text-anchor="middle" font-size="15" fill="#64748b">Self-generated probes · Individual MHA / MLP candidates · Tail-position scoring</text>
+    <path d="M 256 184 H 286 M 518 184 H 548 M 780 184 H 810" stroke="#94a3b8" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <rect x="26" y="92" width="230" height="187" rx="14" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <circle cx="51" cy="119" r="12" fill="#7c3aed"/><text x="51" y="124" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">1</text>
+    <text x="73" y="125" font-size="19" font-weight="700" fill="#4c1d95">Generate probes</text>
+    <rect x="60" y="149" width="161" height="36" rx="8" fill="#ede9fe"/>
+    <text x="141" y="172" text-anchor="middle" font-size="17" font-weight="700" fill="#6d28d9">Dense LLM</text>
+    <rect x="62" y="195" width="24" height="21" rx="4" fill="#c4b5fd"/><rect x="94" y="195" width="24" height="21" rx="4" fill="#c4b5fd"/><rect x="126" y="195" width="24" height="21" rx="4" fill="#c4b5fd"/><rect x="158" y="195" width="24" height="21" rx="4" fill="#a78bfa"/><rect x="190" y="195" width="24" height="21" rx="4" fill="#8b5cf6"/>
+    <text x="141" y="244" text-anchor="middle" font-size="15" fill="#475569">Generic prompts →</text>
+    <text x="141" y="263" text-anchor="middle" font-size="15" fill="#475569">self-generated trajectories</text>
+    <rect x="288" y="92" width="230" height="187" rx="14" fill="#eff6ff" stroke="#bfdbfe"/>
+    <circle cx="313" cy="119" r="12" fill="#2563eb"/><text x="313" y="124" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">2</text>
+    <text x="335" y="125" font-size="19" font-weight="700" fill="#1e3a8a">Cache dense tail</text>
+    <path d="M 331 210 H 478" stroke="#cbd5e1" stroke-width="1.5"/>
+    <rect x="341" y="150" width="21" height="60" rx="3" fill="#3b82f6"/><rect x="369" y="170" width="21" height="40" rx="3" fill="#60a5fa"/><rect x="397" y="183" width="21" height="27" rx="3" fill="#60a5fa"/><rect x="425" y="193" width="21" height="17" rx="3" fill="#93c5fd"/><rect x="453" y="201" width="16" height="9" rx="3" fill="#bfdbfe"/>
+    <text x="403" y="244" text-anchor="middle" font-size="15" fill="#475569">Top-k token distributions</text>
+    <text x="403" y="263" text-anchor="middle" font-size="15" fill="#475569">at generated tail positions</text>
+    <rect x="550" y="92" width="230" height="187" rx="14" fill="#fff7ed" stroke="#fed7aa"/>
+    <circle cx="575" cy="119" r="12" fill="#ea580c"/><text x="575" y="124" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">3</text>
+    <text x="597" y="125" font-size="19" font-weight="700" fill="#9a3412">Score each block</text>
+    <rect x="583" y="153" width="73" height="34" rx="7" fill="#ffedd5" stroke="#fdba74"/><text x="619" y="175" text-anchor="middle" font-size="16" font-weight="700" fill="#c2410c">MHA</text>
+    <rect x="674" y="153" width="73" height="34" rx="7" fill="#ffedd5" stroke="#fdba74"/><text x="710" y="175" text-anchor="middle" font-size="16" font-weight="700" fill="#c2410c">MLP</text>
+    <path d="M 590 159 L 650 181" stroke="#ea580c" stroke-width="2"/>
+    <text x="665" y="212" text-anchor="middle" font-size="16" font-weight="700" fill="#c2410c">Dense vs. disabled: tail KL</text>
+    <text x="665" y="244" text-anchor="middle" font-size="15" fill="#475569">Disable one candidate</text>
+    <text x="665" y="263" text-anchor="middle" font-size="15" fill="#475569">Replay cached trajectories</text>
+    <rect x="812" y="92" width="242" height="187" rx="14" fill="#f0fdf4" stroke="#bbf7d0"/>
+    <circle cx="837" cy="119" r="12" fill="#16a34a"/><text x="837" y="124" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">4</text>
+    <text x="859" y="125" font-size="19" font-weight="700" fill="#14532d">Rank candidates</text>
+    <text x="844" y="165" font-size="14" fill="#166534">Low</text><rect x="887" y="153" width="47" height="14" rx="4" fill="#86efac"/>
+    <text x="844" y="190" font-size="14" fill="#166534">Mid</text><rect x="887" y="178" width="81" height="14" rx="4" fill="#4ade80"/>
+    <text x="844" y="215" font-size="14" fill="#166534">High</text><rect x="887" y="203" width="118" height="14" rx="4" fill="#22c55e"/>
+    <text x="933" y="244" text-anchor="middle" font-size="15" fill="#475569">Mean tail score, ascending</text>
+    <text x="933" y="263" text-anchor="middle" font-size="15" fill="#475569">Lower drift → earlier in order</text>
+    <text x="540" y="312" text-anchor="middle" font-size="15" fill="#64748b">Restore each block after scoring. Export block_scores.json, prune_order.json, and summary.txt.</text>
+  </g>
+</svg>
