@@ -129,11 +129,6 @@ def generate_probe_trajectory(
 
 
 def remaining_log_mass(log_probs: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
-    """Log probability of all vocabulary tokens outside the dense top-k set.
-
-    Masking and logsumexp avoid cancellation in one minus the retained mass.
-    When top-k covers the vocabulary, the complement has log probability -inf.
-    """
     remaining = log_probs.clone()
     remaining.scatter_(-1, indices, float("-inf"))
     return torch.logsumexp(remaining, dim=-1)
@@ -145,19 +140,6 @@ def coarse_grained_forward_kl(
     dense_other_log_prob: torch.Tensor,
     pruned_other_log_prob: torch.Tensor,
 ) -> torch.Tensor:
-    """KL on the dense top-k tokens plus one shared 'other tokens' bin.
-
-    For A = TopK(p), the approximation is
-        sum_{v in A} p(v) log[p(v) / q(v)]
-        + p(other) log[p(other) / q(other)],
-    where p(other) and q(other) sum all probabilities outside the same set A.
-
-    This is a coarse-grained forward KL: nonnegative and a lower bound on the
-    full-vocabulary KL, by the log-sum inequality. It equals full KL when A covers
-    the vocabulary. Probabilities are not renormalized within top-k; omitted
-    mass is retained. Zero-mass bins contribute zero. The final clamp removes
-    floating-point roundoff below zero, not omitted probability mass.
-    """
     dense = torch.cat(
         (dense_topk_log_probs.double(), dense_other_log_prob.double().unsqueeze(-1)),
         dim=-1,
@@ -254,13 +236,6 @@ def compute_block_tail_kl(
     model,
     probes: List[Dict[str, Any]],
 ) -> float:
-    """Score the current model state, including any jointly disabled subset.
-
-    Average tail positions within each probe, then average probes equally
-    (paper Eqs. 6-7). The retained top-k tokens and complement bin define the
-    coarse-grained forward KL described in coarse_grained_forward_kl().
-    The original function name is retained for callers of the scoring API.
-    """
     if not probes:
         raise ValueError("The probe set must be nonempty.")
     device = get_model_input_device(model)
@@ -311,15 +286,6 @@ def adaptive_subset_search(
     blocks,
     config: AdaptiveSearchConfig,
 ) -> Dict[str, Any]:
-    """Search block subsets under K, using the paper's median/MAD beam policy.
-
-    Each expansion adds one block to a retained subset. Scores are cached by
-    the unordered subset, so different insertion orders share an evaluation.
-    B_k retains candidates at step k; its best marginal change determines
-    B_{k+1}. The window contains prior marginal changes, excluding the current
-    change until after the anomaly is measured. During the empty-window warmup,
-    the next beam remains small. No search hyperparameter has a fixed default.
-    """
     if config.budget > len(blocks):
         raise ValueError("The pruning budget exceeds the candidate block count.")
     if len({block.name for block in blocks}) != len(blocks):
@@ -427,11 +393,6 @@ def main(
     prompts: List[str],
     search_config: AdaptiveSearchConfig,
 ) -> None:
-    """Run the original model/probe pipeline and adaptive joint subset search.
-
-    Model, decoding, tail, top-k, and search settings are all supplied externally.
-    The returned subset is a search result; model export is a separate operation.
-    """
     if not prompts:
         raise ValueError("Provide a nonempty collection of generic prompts.")
     set_seed(args.seed)
