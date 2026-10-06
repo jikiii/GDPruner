@@ -12,5 +12,4 @@ The framework follows three stages. First, the dense model generates lightweight
   <img src="assets/overview.svg" width="100%" alt="GDPruner framework: synthetic probe construction, tail-divergence scoring, and adaptive block search.">
 </p>
 
-<p align="center"><em>Overview of GDPruner: synthetic probe construction, tail-divergence scoring, and adaptive block search.</em></p>
 
