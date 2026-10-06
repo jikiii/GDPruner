@@ -161,11 +161,6 @@ def temporarily_disable_blocks(blocks: Iterable[BlockInfo]):
 
 @dataclass(frozen=True)
 class AdaptiveSearchConfig:
-    """Caller-supplied symbolic K, beam widths, window, thresholds, and epsilon.
-
-    No experimental value or default is assigned here. The warmup beam is B_min.
-    The sliding window stores only the preceding marginal score changes.
-    """
 
     budget: int
     beam_min: int
