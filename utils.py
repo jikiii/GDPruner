@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 
 from dataclasses import dataclass
-from contextlib import contextmanager
-from typing import List, Optional, Any
+from contextlib import contextmanager, ExitStack
+from typing import List, Optional, Any, Iterable
+from statistics import median
+import math
 
 import torch
 
@@ -142,3 +144,65 @@ def temporarily_disable_block(block: BlockInfo):
         yield
     finally:
         module.forward = original_forward
+
+@contextmanager
+def temporarily_disable_blocks(blocks: Iterable[BlockInfo]):
+    """Mask a whole candidate subset; restore all modules, also after exceptions."""
+    seen = set()
+    with ExitStack() as stack:
+        for block in blocks:
+            identity = id(block.module)
+            if identity in seen:
+                raise ValueError("A candidate subset cannot contain a module twice.")
+            seen.add(identity)
+            stack.enter_context(temporarily_disable_block(block))
+        yield
+
+
+@dataclass(frozen=True)
+class AdaptiveSearchConfig:
+    """Caller-supplied symbolic K, beam widths, window, thresholds, and epsilon.
+
+    No experimental value or default is assigned here. The warmup beam is B_min.
+    The sliding window stores only the preceding marginal score changes.
+    """
+
+    budget: int
+    beam_min: int
+    beam_mid: int
+    beam_max: int
+    window_size: int
+    tau_1: float
+    tau_2: float
+    epsilon: float
+
+    def __post_init__(self):
+        integers = (self.budget, self.beam_min, self.beam_mid, self.beam_max, self.window_size)
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in integers):
+            raise ValueError("Budget, beam widths, and window size must be integers.")
+        if self.budget < 0:
+            raise ValueError("The pruning budget must be nonnegative.")
+        if not 0 < self.beam_min < self.beam_mid < self.beam_max:
+            raise ValueError("Beam widths must be positive and strictly ordered.")
+        if self.window_size <= 0:
+            raise ValueError("The history window must be positive.")
+        if not all(math.isfinite(value) for value in (self.tau_1, self.tau_2, self.epsilon)):
+            raise ValueError("Expansion thresholds and epsilon must be finite.")
+        if self.tau_1 >= self.tau_2 or self.epsilon <= 0:
+            raise ValueError("Thresholds must be ordered and epsilon must be positive.")
+
+    def next_beam_width(self, marginal: float, recent_marginals: List[float]):
+        """Paper Eqs. 8-9: z = (delta - median) / (MAD + epsilon)."""
+        if not recent_marginals:
+            return self.beam_min, None, None, None
+        window = recent_marginals[-self.window_size:]
+        center = median(window)
+        mad = median(abs(value - center) for value in window)
+        anomaly = (marginal - center) / (mad + self.epsilon)
+        if anomaly < self.tau_1:
+            width = self.beam_min
+        elif anomaly < self.tau_2:
+            width = self.beam_mid
+        else:
+            width = self.beam_max
+        return width, center, mad, anomaly
